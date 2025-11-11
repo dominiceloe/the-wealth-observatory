@@ -139,6 +139,7 @@ export interface ComparisonWithCost extends CalculatedComparison {
   cost_source: string;
   cost_source_url: string;
   cost_category: string;
+  cost_per_unit: number;
 }
 
 export interface LuxuryWithComparisons extends LuxuryPurchase {
