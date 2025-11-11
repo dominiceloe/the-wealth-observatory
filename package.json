@@ -1,0 +1,39 @@
+{
+  "name": "the-wealth-observatory",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3003",
+    "build": "next build",
+    "start": "next start -p 3003",
+    "lint": "next lint",
+    "test:db": "tsx scripts/test-db-connection.ts",
+    "seed": "tsx scripts/seed-initial-data.ts",
+    "validate:costs": "tsx scripts/validate-costs.ts"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^6.5.0",
+    "@mui/material": "^6.5.0",
+    "date-fns": "^4.1.0",
+    "marked": "^17.0.0",
+    "next": "^14.2.0",
+    "pg": "^8.16.3",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "recharts": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/marked": "^5.0.2",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "dotenv": "^17.2.3",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.2.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.0.0"
+  }
+}
