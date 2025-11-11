@@ -159,7 +159,7 @@ export async function insertDailySnapshot(data: {
   snapshotDate: Date;
   netWorth: number;
   rank?: number;
-  dailyChange?: number;
+  dailyChange?: number | null;
   dataSourceId?: number;
 }): Promise<void> {
   await query(`
