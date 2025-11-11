@@ -53,7 +53,7 @@ export async function getCalculatedComparisons(
 /**
  * Valid regions for comparison filtering
  */
-export const VALID_REGIONS = ['Global', 'United States', 'Sub-Saharan Africa'] as const;
+export const VALID_REGIONS = ['Developing World', 'United States'] as const;
 export type ValidRegion = typeof VALID_REGIONS[number];
 
 /**
@@ -72,8 +72,8 @@ export async function getAggregateComparisons(
   // Validate and sanitize region input
   let validatedRegion: string = region;
   if (!VALID_REGIONS.includes(region as ValidRegion)) {
-    console.warn(`Invalid region "${region}" provided, falling back to Global`);
-    validatedRegion = 'Global';
+    console.warn(`Invalid region "${region}" provided, falling back to Developing World`);
+    validatedRegion = 'Developing World';
   }
 
   // Get wealth threshold from config
@@ -95,13 +95,13 @@ export async function getAggregateComparisons(
     LIMIT 6
   `, [validatedRegion]);
 
-  // Fallback to Global region if no costs found for requested region
-  if (costs.rows.length === 0 && validatedRegion !== 'Global') {
-    console.warn(`No comparison costs found for region "${validatedRegion}", falling back to Global`);
+  // Fallback to Developing World region if no costs found for requested region
+  if (costs.rows.length === 0 && validatedRegion !== 'Developing World') {
+    console.warn(`No comparison costs found for region "${validatedRegion}", falling back to Developing World`);
     costs = await query<ComparisonCost>(`
       SELECT *
       FROM comparison_costs
-      WHERE active = true AND region = 'Global'
+      WHERE active = true AND region = 'Developing World'
       ORDER BY display_order ASC
       LIMIT 6
     `);

@@ -24,10 +24,10 @@ type PageProps = {
 
 export default async function HomePage({ searchParams }: PageProps) {
   // Validate region parameter
-  const requestedRegion = searchParams.region || 'Global';
+  const requestedRegion = searchParams.region || 'Developing World';
   const region = VALID_REGIONS.includes(requestedRegion as ValidRegion)
     ? requestedRegion
-    : 'Global';
+    : 'Developing World';
 
   // Fetch all data in parallel
   const [billionaires, comparisonCosts, aggregateStats] = await Promise.all([

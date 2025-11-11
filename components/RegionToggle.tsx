@@ -7,7 +7,7 @@ import { Public, LocationCity } from '@mui/icons-material';
 export default function RegionToggle() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const currentRegion = searchParams.get('region') || 'Global';
+  const currentRegion = searchParams.get('region') || 'Developing World';
 
   const handleRegionChange = (_event: React.MouseEvent<HTMLElement>, newRegion: string | null) => {
     if (newRegion !== null) {
@@ -36,7 +36,7 @@ export default function RegionToggle() {
           },
         }}
       >
-        <ToggleButton value="Global" aria-label="global region">
+        <ToggleButton value="Developing World" aria-label="global region">
           <Public sx={{ mr: 1, fontSize: '1.2rem' }} />
           Developing World
           <Typography variant="caption" sx={{ ml: 1, opacity: 0.7 }}>
@@ -52,7 +52,7 @@ export default function RegionToggle() {
         </ToggleButton>
       </ToggleButtonGroup>
 
-      {currentRegion === 'Global' && (
+      {currentRegion === 'Developing World' && (
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, maxWidth: 600, textAlign: 'center' }}>
           Showing costs in developing countries where humanitarian aid is most effective per dollar
         </Typography>
