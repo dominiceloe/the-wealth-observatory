@@ -52,7 +52,6 @@ async function backfillDay(date: string): Promise<void> {
   }
 
   let created = 0;
-  let updated = 0;
 
   for (const person of data) {
     try {
