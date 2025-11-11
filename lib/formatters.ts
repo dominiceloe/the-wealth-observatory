@@ -6,16 +6,23 @@
 import { FORMAT_THRESHOLDS } from './constants';
 
 /**
- * Format large numbers with appropriate scale (billion, million, thousand)
+ * Format large numbers with appropriate scale (trillion, billion, million, thousand)
  * @param quantity - The number to format
- * @returns Formatted string (e.g., "32.5 billion", "1.2 million")
+ * @returns Formatted string (e.g., "11.9 trillion", "32.5 billion", "1.2 million")
  */
 export function formatQuantity(quantity: number): string {
   let formatted: string;
 
+  const TRILLION = 1_000_000_000_000;
+
+  if (quantity >= TRILLION) {
+    formatted = (quantity / TRILLION).toFixed(1);
+    formatted = formatted.replace(/\.0$/, ''); // Remove .0 if whole number
+    return `${formatted} trillion`;
+  }
   if (quantity >= FORMAT_THRESHOLDS.BILLION) {
     formatted = (quantity / FORMAT_THRESHOLDS.BILLION).toFixed(1);
-    formatted = formatted.replace(/\.0$/, ''); // Remove .0 if whole number
+    formatted = formatted.replace(/\.0$/, '');
     return `${formatted} billion`;
   }
   if (quantity >= FORMAT_THRESHOLDS.MILLION) {
