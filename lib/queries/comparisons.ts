@@ -156,7 +156,11 @@ export async function calculateAndStoreComparisons(
     WHERE active = true
   `);
 
-  let comparisonsCreated = 0;
+  // Build all rows in memory, then insert in batched multi-row statements.
+  // This replaces up to N×M sequential INSERTs (e.g. 50 billionaires × 18
+  // costs = 900 round-trips) with a few bulk inserts, which is what keeps the
+  // daily cron under the serverless function timeout.
+  const rows: Array<[number, number, Date, number, number]> = [];
 
   for (const billionaire of billionaires.rows) {
     const netWorthMillions = Number(billionaire.net_worth); // Convert bigint string to number
@@ -165,25 +169,42 @@ export async function calculateAndStoreComparisons(
 
     for (const cost of costs.rows) {
       const quantity = Math.floor(usableWealthUSD / Number(cost.cost));
-
       if (quantity > 0) {
-        await query(`
-          INSERT INTO calculated_comparisons
-          (billionaire_id, comparison_cost_id, calculation_date, net_worth_used, quantity)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT (billionaire_id, comparison_cost_id, calculation_date)
-          DO UPDATE SET quantity = EXCLUDED.quantity, net_worth_used = EXCLUDED.net_worth_used
-        `, [
-          billionaire.id,
-          cost.id,
-          calculationDate,
-          usableWealthMillions,
-          quantity,
-        ]);
-        comparisonsCreated++;
+        rows.push([billionaire.id, cost.id, calculationDate, usableWealthMillions, quantity]);
       }
     }
   }
 
-  return comparisonsCreated;
+  if (rows.length === 0) return 0;
+
+  // Chunk to stay well under Postgres' 65535 bound parameter limit (5 params/row).
+  const COLS = 5;
+  const CHUNK_SIZE = 1000;
+
+  for (let start = 0; start < rows.length; start += CHUNK_SIZE) {
+    const chunk = rows.slice(start, start + CHUNK_SIZE);
+    const values: any[] = [];
+    const placeholders: string[] = [];
+
+    chunk.forEach((row, i) => {
+      const base = i * COLS;
+      placeholders.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`
+      );
+      values.push(...row);
+    });
+
+    await query(
+      `
+      INSERT INTO calculated_comparisons
+      (billionaire_id, comparison_cost_id, calculation_date, net_worth_used, quantity)
+      VALUES ${placeholders.join(', ')}
+      ON CONFLICT (billionaire_id, comparison_cost_id, calculation_date)
+      DO UPDATE SET quantity = EXCLUDED.quantity, net_worth_used = EXCLUDED.net_worth_used
+    `,
+      values
+    );
+  }
+
+  return rows.length;
 }

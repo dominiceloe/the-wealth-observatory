@@ -152,6 +152,158 @@ export async function upsertBillionaire(data: {
 }
 
 /**
+ * Bulk upsert billionaires in a single round-trip (for cron updates).
+ *
+ * Replaces N×(SELECT + INSERT) with one multi-row INSERT ... ON CONFLICT.
+ * Uses the `xmax = 0` system-column trick to detect, per row, whether it was
+ * freshly inserted (created) vs updated — avoids a separate existence check.
+ *
+ * Returns a map of slug -> { id, wasCreated } so callers can wire up snapshots.
+ */
+export async function bulkUpsertBillionaires(
+  people: Array<{
+    name: string;
+    slug: string;
+    gender?: string;
+    country?: string;
+    industries?: string[];
+    birthDate?: Date;
+    imageUrl?: string;
+    bio?: string;
+    forbesUri?: string;
+  }>
+): Promise<Map<string, { id: number; wasCreated: boolean }>> {
+  const result = new Map<string, { id: number; wasCreated: boolean }>();
+  if (people.length === 0) return result;
+
+  const COLS = 9;
+  const values: any[] = [];
+  const rows: string[] = [];
+
+  people.forEach((p, i) => {
+    const base = i * COLS;
+    rows.push(
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`
+    );
+    values.push(
+      p.name,
+      p.slug,
+      p.gender || null,
+      p.country || null,
+      p.industries || [],
+      p.birthDate || null,
+      p.imageUrl || null,
+      p.bio || null,
+      p.forbesUri || null
+    );
+  });
+
+  const res = await query<{ id: number; slug: string; was_created: boolean }>(
+    `
+    INSERT INTO billionaires
+    (person_name, slug, gender, country_of_citizenship, industries, birth_date, image_url, bio, forbes_uri)
+    VALUES ${rows.join(', ')}
+    ON CONFLICT (slug) DO UPDATE
+    SET person_name = EXCLUDED.person_name,
+        gender = EXCLUDED.gender,
+        country_of_citizenship = EXCLUDED.country_of_citizenship,
+        industries = EXCLUDED.industries,
+        birth_date = EXCLUDED.birth_date,
+        image_url = EXCLUDED.image_url,
+        bio = EXCLUDED.bio,
+        forbes_uri = EXCLUDED.forbes_uri,
+        updated_at = CURRENT_TIMESTAMP
+    RETURNING id, slug, (xmax = 0) AS was_created
+  `,
+    values
+  );
+
+  for (const row of res.rows) {
+    result.set(row.slug, { id: row.id, wasCreated: row.was_created });
+  }
+
+  return result;
+}
+
+/**
+ * Fetch the previous day's net worth for a set of billionaires in one query.
+ * Returns a map of billionaireId -> net_worth (for computing daily change).
+ */
+export async function getPreviousDaySnapshots(
+  billionaireIds: number[],
+  snapshotDate: Date
+): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (billionaireIds.length === 0) return map;
+
+  const res = await query<{ billionaire_id: number; net_worth: string }>(
+    `
+    SELECT billionaire_id, net_worth
+    FROM daily_snapshots
+    WHERE billionaire_id = ANY($1)
+    AND snapshot_date = $2::date - INTERVAL '1 day'
+  `,
+    [billionaireIds, snapshotDate]
+  );
+
+  for (const row of res.rows) {
+    map.set(Number(row.billionaire_id), Number(row.net_worth));
+  }
+
+  return map;
+}
+
+/**
+ * Bulk insert/update daily snapshots in a single round-trip (for cron updates).
+ */
+export async function bulkInsertDailySnapshots(
+  snapshots: Array<{
+    billionaireId: number;
+    snapshotDate: Date;
+    netWorth: number;
+    rank?: number;
+    dailyChange?: number | null;
+    dataSourceId?: number;
+  }>
+): Promise<void> {
+  if (snapshots.length === 0) return;
+
+  const COLS = 6;
+  const values: any[] = [];
+  const rows: string[] = [];
+
+  snapshots.forEach((s, i) => {
+    const base = i * COLS;
+    rows.push(
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`
+    );
+    values.push(
+      s.billionaireId,
+      s.snapshotDate,
+      s.netWorth,
+      s.rank ?? null,
+      s.dailyChange ?? null,
+      s.dataSourceId ?? null
+    );
+  });
+
+  await query(
+    `
+    INSERT INTO daily_snapshots
+    (billionaire_id, snapshot_date, net_worth, rank, daily_change, data_source_id)
+    VALUES ${rows.join(', ')}
+    ON CONFLICT (billionaire_id, snapshot_date)
+    DO UPDATE SET
+      net_worth = EXCLUDED.net_worth,
+      rank = EXCLUDED.rank,
+      daily_change = EXCLUDED.daily_change,
+      data_source_id = EXCLUDED.data_source_id
+  `,
+    values
+  );
+}
+
+/**
  * Insert daily snapshot (for cron updates)
  */
 export async function insertDailySnapshot(data: {

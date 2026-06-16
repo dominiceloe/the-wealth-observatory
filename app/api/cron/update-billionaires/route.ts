@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  upsertBillionaire,
-  insertDailySnapshot,
+  bulkUpsertBillionaires,
+  getPreviousDaySnapshots,
+  bulkInsertDailySnapshots,
 } from '@/lib/queries/billionaires';
 import { calculateAndStoreComparisons } from '@/lib/queries/comparisons';
 import { logUpdateMetadata } from '@/lib/queries/metadata';
 import { getDataSourceByName, updateDataSourceAccessed } from '@/lib/queries/data-sources';
 import { updateConfigValue } from '@/lib/queries/config';
-import { query } from '@/lib/db';
 
 interface ForbesPerson {
   uri: string;
@@ -113,20 +113,44 @@ export async function GET(request: NextRequest) {
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Normalize to midnight
 
-    for (const person of forbesData.slice(0, 50)) { // Top 50 only
-      try {
-        // Create slug (prefer uri for consistency with seed script)
-        const slug = createSlug(person.uri || person.personName);
+    // Prepare the top 50 for bulk processing. We normalize each record up
+    // front (slug, birthDate, worth) and de-duplicate by slug so the bulk
+    // upsert never sees two conflicting rows for the same person in one batch.
+    const topPeople = forbesData.slice(0, 50);
+    const preparedBySlug = new Map<
+      string,
+      {
+        person: ForbesPerson;
+        slug: string;
+        birthDate?: Date;
+        currentWorthMillions: number;
+      }
+    >();
 
-        // Validate and convert birthDate (Forbes API sometimes has invalid values)
-        let birthDate: Date | undefined;
-        if (person.birthDate && person.birthDate > 0 && person.birthDate < 4000000000) {
-          // Unix timestamp in seconds, convert to Date (valid range: 1970-2096)
-          birthDate = new Date(person.birthDate * 1000);
-        }
+    for (const person of topPeople) {
+      const slug = createSlug(person.uri || person.personName);
 
-        // Upsert billionaire
-        const { id: billionaireId, wasCreated } = await upsertBillionaire({
+      // Validate and convert birthDate (Forbes API sometimes has invalid values)
+      let birthDate: Date | undefined;
+      if (person.birthDate && person.birthDate > 0 && person.birthDate < 4000000000) {
+        // Unix timestamp in seconds, convert to Date (valid range: 1970-2096)
+        birthDate = new Date(person.birthDate * 1000);
+      }
+
+      preparedBySlug.set(slug, {
+        person,
+        slug,
+        birthDate,
+        currentWorthMillions: Math.round(person.finalWorth || 0),
+      });
+    }
+
+    const prepared = Array.from(preparedBySlug.values());
+
+    try {
+      // 1) Bulk upsert all billionaires in one round-trip.
+      const upsertResult = await bulkUpsertBillionaires(
+        prepared.map(({ person, slug, birthDate }) => ({
           name: person.personName,
           slug,
           gender: person.gender,
@@ -136,50 +160,51 @@ export async function GET(request: NextRequest) {
           imageUrl: normalizeImageUrl(person.squareImage),
           bio: person.bio?.[0],
           forbesUri: person.uri,
-        });
+        }))
+      );
 
-        // Track created vs updated
-        if (wasCreated) {
+      for (const result of upsertResult.values()) {
+        if (result.wasCreated) {
           recordsCreated++;
         } else {
           recordsUpdated++;
         }
+      }
 
-        // Calculate daily change from yesterday's snapshot
-        const currentWorthMillions = Math.round(person.finalWorth || 0);
-        const yesterdaySnapshot = await query(
-          `SELECT net_worth FROM daily_snapshots
-           WHERE billionaire_id = $1
-           AND snapshot_date = $2::date - INTERVAL '1 day'
-           LIMIT 1`,
-          [billionaireId, today]
-        );
+      // 2) Fetch yesterday's snapshots for everyone in one round-trip.
+      const billionaireIds = Array.from(upsertResult.values()).map((r) => r.id);
+      const yesterdayWorthById = await getPreviousDaySnapshots(billionaireIds, today);
 
-        // Calculate daily change (null if no yesterday data exists)
-        let dailyChangeMillions: number | null = null;
-
-        if (yesterdaySnapshot.rows.length > 0) {
-          const yesterdayWorth = Number(yesterdaySnapshot.rows[0].net_worth);
-          dailyChangeMillions = Math.round(currentWorthMillions - yesterdayWorth);
-        } else {
-          // First snapshot for this billionaire, or data gap
-          console.log(`No yesterday snapshot for ${person.personName}, setting dailyChange to null`);
+      // 3) Bulk insert today's snapshots in one round-trip.
+      const snapshots = [];
+      for (const { person, slug, currentWorthMillions } of prepared) {
+        const upserted = upsertResult.get(slug);
+        if (!upserted) {
+          console.error(`No upsert result for ${person.personName} (${slug})`);
+          recordsFailed++;
+          continue;
         }
 
-        // Insert daily snapshot
-        await insertDailySnapshot({
-          billionaireId,
+        const yesterdayWorth = yesterdayWorthById.get(upserted.id);
+        const dailyChangeMillions =
+          yesterdayWorth !== undefined
+            ? Math.round(currentWorthMillions - yesterdayWorth)
+            : null;
+
+        snapshots.push({
+          billionaireId: upserted.id,
           snapshotDate: today,
           netWorth: currentWorthMillions,
           rank: person.rank,
           dailyChange: dailyChangeMillions,
           dataSourceId,
         });
-
-      } catch (error) {
-        console.error(`Failed to process ${person.personName}:`, error);
-        recordsFailed++;
       }
+
+      await bulkInsertDailySnapshots(snapshots);
+    } catch (error) {
+      console.error('Failed during bulk billionaire processing:', error);
+      throw error;
     }
 
     // Calculate comparisons
