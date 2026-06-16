@@ -259,9 +259,24 @@ export async function GET(request: NextRequest) {
  */
 async function fetchForbesData(): Promise<ForbesPerson[]> {
   try {
-    // Try official Forbes API endpoint
+    // Try official Forbes API endpoint.
+    // NOTE: Forbes started returning HTTP 503 for the unbounded request (it
+    // serves the entire dataset). Scoping the response with an explicit
+    // `fields` list keeps the payload small enough that Forbes serves it (200).
+    const fields = [
+      'uri',
+      'personName',
+      'squareImage',
+      'countryOfCitizenship',
+      'industries',
+      'finalWorth',
+      'rank',
+      'gender',
+      'birthDate',
+      'bio',
+    ].join(',');
     const response = await fetch(
-      'https://www.forbes.com/forbesapi/person/rtb/0/position/true.json',
+      `https://www.forbes.com/forbesapi/person/rtb/0/position/true.json?fields=${fields}`,
       {
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; WealthObservatory/1.0)',
